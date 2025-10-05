@@ -1,0 +1,91 @@
+//@version=5
+indicator("Bullish & Bearish CISD", overlay=true, max_lines_count=500, max_labels_count=500)
+
+// =====================================================================
+// NEW CISD LOGIC (Wick-Based Detection)
+// =====================================================================
+prevRange      = high[1] - low[1]
+prevBodySize   = math.abs(close[1] - open[1])
+prevUpperWick  = high[1] - math.max(open[1], close[1])
+prevLowerWick  = math.min(open[1], close[1]) - low[1]
+
+isPrevRed   = close[1] < open[1]
+isPrevGreen = close[1] > open[1]
+
+// Bullish CISD conditions
+isBullishWick = (prevLowerWick > prevUpperWick) and (prevLowerWick >= 0.3 * prevRange)
+
+// Bearish CISD conditions
+isBearishWick = (prevUpperWick > prevLowerWick) and (prevUpperWick >= 0.3 * prevRange)
+
+// Confirmations
+isConfirmGreen             = close > open
+isConfirmCloseAboveHigh    = close > high[1]
+isConfirmLowAbovePrevLow   = low >= low[1]
+isConfirmRed               = close < open
+isConfirmCloseBelowLow     = close < low[1]
+isConfirmHighBelowPrevHigh = high <= high[1]
+
+// Swings
+isSwingLow  = (low[2] > low[1]) and (low >= low[1])
+isSwingHigh = (high[2] < high[1]) and (high <= high[1])
+
+// Final CISD setups
+isBullishCISD = isPrevRed and isBullishWick and isConfirmGreen and isConfirmCloseAboveHigh and isConfirmLowAbovePrevLow and isSwingLow
+isBearishCISD = isPrevGreen and isBearishWick and isConfirmRed and isConfirmCloseBelowLow and isConfirmHighBelowPrevHigh and isSwingHigh
+
+// =====================================================================
+// CISD Labels
+// =====================================================================
+if isBullishCISD
+    label.new(bar_index[1], low[1], "Bullish\nCISD", style=label.style_label_up, color=color.new(color.green, 15), textcolor=color.white, size=size.small)
+
+if isBearishCISD
+    label.new(bar_index[1], high[1], "Bearish\nCISD", style=label.style_label_down, color=color.new(color.red, 15), textcolor=color.white, size=size.small)
+
+// =====================================================================
+// CISD Lines
+// =====================================================================
+var bullLines  = array.new_line()
+var bearLines  = array.new_line()
+var bullBars   = array.new_int()
+var bearBars   = array.new_int()
+var bullActive = array.new_int()
+var bearActive = array.new_int()
+
+if isBullishCISD
+    ln = line.new(bar_index[1], high[1], bar_index, high[1], extend=extend.right, color=color.green, width=2)
+    array.push(bullLines, ln)
+    array.push(bullBars, bar_index[1])
+    array.push(bullActive, 1)
+
+if isBearishCISD
+    ln = line.new(bar_index[1], low[1], bar_index, low[1], extend=extend.right, color=color.red, width=2)
+    array.push(bearLines, ln)
+    array.push(bearBars, bar_index[1])
+    array.push(bearActive, 1)
+
+if array.size(bullLines) > 0
+    for i = 0 to array.size(bullLines) - 1
+        if array.get(bullActive, i) == 1
+            ln = array.get(bullLines, i)
+            sb = array.get(bullBars, i)
+            if bar_index > sb + 1 and high >= line.get_y1(ln)
+                line.set_extend(ln, extend.none)
+                line.set_x2(ln, bar_index)
+                array.set(bullActive, i, 0)
+
+if array.size(bearLines) > 0
+    for i = 0 to array.size(bearLines) - 1
+        if array.get(bearActive, i) == 1
+            ln = array.get(bearLines, i)
+            sb = array.get(bearBars, i)
+            if bar_index > sb + 1 and low <= line.get_y1(ln)
+                line.set_extend(ln, extend.none)
+                line.set_x2(ln, bar_index)
+                array.set(bearActive, i, 0)
+
+// =====================================================================
+// ALERTS
+// =====================================================================
+alertcondition((isBullishCISD or isBearishCISD), title="CISD Formation", message="New CISD detected ")
