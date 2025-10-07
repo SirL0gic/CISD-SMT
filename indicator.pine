@@ -2,7 +2,7 @@
 indicator("Bullish & Bearish CISD + SMT Divergence", overlay=true, max_lines_count=500, max_labels_count=500)
 
 // =====================================================================
-//  CISD 
+//  CISD (unchanged logic)
 // =====================================================================
 prevRange      = high[1] - low[1]
 prevBodySize   = math.abs(close[1] - open[1])
@@ -83,45 +83,91 @@ if array.size(bearLines) > 0
 alertcondition((isBullishCISD or isBearishCISD), title="CISD Formation", message="New CISD detected")
 
 // =====================================================================
-//  SMT DIVERGENCE MODULE (LuxAlgo-style, single comparison symbol)
+//  SMT DIVERGENCE MODULE (Advanced Swing-Based, Asynchronous Detection)
 // =====================================================================
 smtSymbol = input.symbol("NASDAQ:NDX", "SMT Comparison Symbol")
-length = input.int(3, "Pivot Lookback", minval=2)
+left = input.int(3, "Swing Left Bars", minval=1)
+right = input.int(3, "Swing Right Bars", minval=1)
 
 // Comparison symbol data
-[h_smt, l_smt, c_smt] = request.security(smtSymbol, timeframe.period, [high, low, close])
+h_smt = request.security(smtSymbol, timeframe.period, high)
+l_smt = request.security(smtSymbol, timeframe.period, low)
 
-// Detect pivots
-ph = ta.pivothigh(high, length, length)
-pl = ta.pivotlow(low, length, length)
-smt_ph = ta.pivothigh(h_smt, length, length)
-smt_pl = ta.pivotlow(l_smt, length, length)
+// Detect swings
+chartSwingHigh = ta.pivothigh(high, left, right)
+chartSwingLow  = ta.pivotlow(low, left, right)
+smtSwingHigh   = ta.pivothigh(h_smt, left, right)
+smtSwingLow    = ta.pivotlow(l_smt, left, right)
 
-// Store previous swing values
-var float prevHigh = na
-var float prevLow  = na
-var float prevSMTHigh = na
-var float prevSMTLow  = na
-var int prevHighBar = na
-var int prevLowBar  = na
+// Arrays to store swing data (persistent)
+var chartHighs = array.new_float()
+var chartHighBars = array.new_int()
+var chartLows = array.new_float()
+var chartLowBars = array.new_int()
+var smtHighs = array.new_float()
+var smtLows = array.new_float()
 
-if not na(ph)
-    if not na(prevHigh) and not na(prevSMTHigh)
-        // Bearish SMT: chart HH, SMT fails HH
-        if ph > prevHigh and not (h_smt > prevSMTHigh)
-            line.new(prevHighBar, prevHigh, bar_index[length], ph, color=color.new(color.red, 0), width=2, style=line.style_dashed)
-            label.new(bar_index[length], ph, "🔴 SMT Bearish", style=label.style_label_down, color=color.new(color.red, 80), textcolor=color.white, size=size.tiny)
-    prevHigh := ph
-    prevHighBar := bar_index[length]
-    prevSMTHigh := smt_ph
+// Add new swing highs/lows
+if not na(chartSwingHigh)
+    array.push(chartHighs, chartSwingHigh)
+    array.push(chartHighBars, bar_index[right])
+if not na(chartSwingLow)
+    array.push(chartLows, chartSwingLow)
+    array.push(chartLowBars, bar_index[right])
+if not na(smtSwingHigh)
+    array.push(smtHighs, smtSwingHigh)
+if not na(smtSwingLow)
+    array.push(smtLows, smtSwingLow)
 
-if not na(pl)
-    if not na(prevLow) and not na(prevSMTLow)
-        // Bullish SMT: chart LL, SMT fails LL
-        if pl < prevLow and not (l_smt < prevSMTLow)
-            line.new(prevLowBar, prevLow, bar_index[length], pl, color=color.new(color.green, 0), width=2, style=line.style_dashed)
-            label.new(bar_index[length], pl, "🟢 SMT Bullish", style=label.style_label_up, color=color.new(color.green, 80), textcolor=color.white, size=size.tiny)
-    prevLow := pl
-    prevLowBar := bar_index[length]
-    prevSMTLow := smt_pl
+// Limit array size
+maxKeep = 30
+while array.size(chartHighs) > maxKeep
+    array.shift(chartHighs)
+    array.shift(chartHighBars)
+while array.size(chartLows) > maxKeep
+    array.shift(chartLows)
+    array.shift(chartLowBars)
+while array.size(smtHighs) > maxKeep
+    array.shift(smtHighs)
+while array.size(smtLows) > maxKeep
+    array.shift(smtLows)
 
+// Detect SMT divergences (asynchronous)
+if not na(chartSwingHigh) and array.size(chartHighs) > 1 and array.size(smtHighs) > 0
+    // Find the most recent valid previous swing
+    float refChartHigh = na
+    float refSMTHigh = na
+    int refBarHigh = na
+    for i = array.size(chartHighs) - 2 to 0
+        refChartHigh := array.get(chartHighs, i)
+        refBarHigh   := array.get(chartHighBars, i)
+        if array.size(smtHighs) > i
+            refSMTHigh := array.get(smtHighs, i)
+        else
+            refSMTHigh := array.get(smtHighs, array.size(smtHighs) - 1)
+        break
+
+    // Bearish SMT: chart makes HH, SMT fails HH
+    if not na(refChartHigh) and not na(refSMTHigh)
+        if chartSwingHigh > refChartHigh and not (h_smt > refSMTHigh)
+            line.new(refBarHigh, refChartHigh, bar_index[right], chartSwingHigh, color=color.new(color.red, 0), width=2, style=line.style_dashed)
+            label.new(bar_index[right], chartSwingHigh, "🔴 SMT Bearish", style=label.style_label_down, color=color.new(color.red, 80), textcolor=color.white, size=size.tiny)
+
+if not na(chartSwingLow) and array.size(chartLows) > 1 and array.size(smtLows) > 0
+    float refChartLow = na
+    float refSMTLow = na
+    int refBarLow = na
+    for i = array.size(chartLows) - 2 to 0
+        refChartLow := array.get(chartLows, i)
+        refBarLow   := array.get(chartLowBars, i)
+        if array.size(smtLows) > i
+            refSMTLow := array.get(smtLows, i)
+        else
+            refSMTLow := array.get(smtLows, array.size(smtLows) - 1)
+        break
+
+    // Bullish SMT: chart makes LL, SMT fails LL
+    if not na(refChartLow) and not na(refSMTLow)
+        if chartSwingLow < refChartLow and not (l_smt < refSMTLow)
+            line.new(refBarLow, refChartLow, bar_index[right], chartSwingLow, color=color.new(color.green, 0), width=2, style=line.style_dashed)
+            label.new(bar_index[right], chartSwingLow, "🟢 SMT Bullish", style=label.style_label_up, color=color.new(color.green, 80), textcolor=color.white, size=size.tiny)
